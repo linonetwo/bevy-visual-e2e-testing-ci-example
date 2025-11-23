@@ -1,0 +1,102 @@
+name: Test
+
+on:
+  pull_request:
+    branches: [ master ]
+  push:
+    branches: [ master ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # CI 优化：禁用增量编译（CI 从零构建，增量编译反而增加开销）
+  CARGO_INCREMENTAL: 0
+  # 减少调试信息生成
+  CARGO_PROFILE_DEV_DEBUG: 0
+
+jobs:
+  check-and-test:
+    name: Format, Lint & Test
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-0 \
+            libssl-dev \
+            clang \
+            mold \
+            libwayland-dev \
+            wayland-protocols \
+            libasound2-dev \
+            libpulse-dev \
+            libudev-dev \
+            xvfb \
+            libgl1-mesa-dri \
+            mesa-vulkan-drivers \
+            fonts-liberation \
+            fonts-noto-cjk \
+            fonts-wqy-zenhei \
+            libasound2-plugins
+
+      - name: Setup Linux linker
+        if: runner.os == 'Linux'
+        run: |
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=mold" >> $GITHUB_ENV
+
+      - name: Setup Windows linker  
+        if: runner.os == 'Windows'
+        run: |
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "build-${{ matrix.os }}"
+          cache-on-failure: true
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Create logs directory
+        run: mkdir -p logs
+        shell: bash
+
+      - name: Run tests
+        if: runner.os == 'Windows'
+        run: cargo test
+
+      - name: Run tests (Linux with virtual display)
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1024x768x24" cargo test
+        timeout-minutes: 30
+
+      - name: Upload test logs and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: logs/
+          retention-days: 7
