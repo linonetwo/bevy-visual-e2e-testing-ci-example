@@ -2,6 +2,8 @@
 
 使用 Bevy v0.17.2 开发的简单游戏示例。主要是设置了测试框架，确保 Github Copilot 能自己通过 e2e 测试验证改动，自己 TDD。
 
+基于讨论 https://github.com/bevyengine/bevy/discussions/21750
+
 ## 功能
 
 - 窗口系统
