@@ -73,13 +73,13 @@ fn setup_test_logging(log_file: &str) {
                 .additive(false)
                 .build("simple_game", LevelFilter::Info),
         )
-        // 测试自动化日志：输出到主日志
+        // 测试系统日志：输出到主日志
         .logger(
             Logger::builder()
                 .appender("file")
                 .appender("debug_file")
                 .additive(false)
-                .build("test_automation", LevelFilter::Info),
+            .build("test_system", LevelFilter::Info),
         )
         // 其他所有库：只输出到 debug 日志
         .build(Root::builder().appender("debug_file").build(debug_level))

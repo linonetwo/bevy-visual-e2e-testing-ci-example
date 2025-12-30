@@ -1,10 +1,7 @@
 use backoff::ExponentialBackoffBuilder;
 use cucumber::{given, then, when, StatsWriter, World};
 use serde_json::json;
-use std::net::TcpStream;
 use std::time::Duration;
-use tungstenite::stream::MaybeTlsStream;
-use tungstenite::{Message, WebSocket};
 
 mod test_utilities;
 use test_utilities::*;
@@ -15,14 +12,6 @@ fn game_startup_backoff() -> backoff::ExponentialBackoff {
         .with_initial_interval(Duration::from_millis(500))
         .with_max_interval(Duration::from_secs(2))
         .with_max_elapsed_time(Some(Duration::from_secs(10)))
-        .build()
-}
-
-fn websocket_connection_backoff() -> backoff::ExponentialBackoff {
-    ExponentialBackoffBuilder::new()
-        .with_initial_interval(Duration::from_millis(100))
-        .with_max_interval(Duration::from_secs(1))
-        .with_max_elapsed_time(Some(Duration::from_secs(5)))
         .build()
 }
 
@@ -38,9 +27,10 @@ fn log_check_backoff() -> backoff::ExponentialBackoff {
 #[world(init = Self::new)]
 pub struct GameWorld {
     log_content: String,
-    ws_connection: Option<WebSocket<MaybeTlsStream<TcpStream>>>,
+    http_client: reqwest::Client,
     game_process: Option<std::process::Child>,
     test_port: u16,
+    base_url: String,
     log_file_name: String,
     scenario_name: String,
     scenario_dir: String,
@@ -50,9 +40,10 @@ impl GameWorld {
     fn new() -> Self {
         Self {
             log_content: String::new(),
-            ws_connection: None,
+            http_client: reqwest::Client::new(),
             game_process: None,
             test_port: 0,
+            base_url: String::new(),
             log_file_name: String::new(),
             scenario_name: String::new(),
             scenario_dir: String::new(),
@@ -62,11 +53,6 @@ impl GameWorld {
 
 impl Drop for GameWorld {
     fn drop(&mut self) {
-        // 关闭 WebSocket 连接
-        if let Some(mut socket) = self.ws_connection.take() {
-            let _ = socket.close(None);
-        }
-
         // 停止游戏进程
         if let Some(mut process) = self.game_process.take() {
             let _ = process.kill();
@@ -76,65 +62,122 @@ impl Drop for GameWorld {
 }
 
 impl GameWorld {
-    fn take_screenshot(&mut self, step_name: &str, step_number: usize) {
+    async fn take_screenshot(&mut self, step_name: &str, step_number: usize) {
         let screenshot_path = format!(
             "{}/step_{:02}_{}.png",
             self.scenario_dir, step_number, step_name
         );
 
-        self.send_ws_command("screenshot", json!({ "path": screenshot_path }));
+        self.screenshot(&screenshot_path).await;
     }
 
-    fn send_hover(&mut self, x: f32, y: f32) {
-        self.send_ws_command("hover", json!({ "x": x, "y": y }));
+    fn graphql_endpoint(&self) -> String {
+        format!("{}/graphql", self.base_url)
     }
 
-    fn send_click(&mut self, x: f32, y: f32) {
-        self.send_ws_command("click", json!({ "x": x, "y": y }));
+    fn health_endpoint(&self) -> String {
+        format!("{}/health", self.base_url)
     }
 
-    // 统一的 WebSocket 命令发送
-    fn send_ws_command(&mut self, action: &str, params: serde_json::Value) {
-        if self.ws_connection.is_none() {
-            self.connect_ws();
-        }
-
-        let Some(socket) = &mut self.ws_connection else {
-            return;
-        };
-
-        let command = json!({
-            "action": action,
-            "params": params
+    async fn graphql_request(
+        &self,
+        query: &str,
+        variables: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let payload = json!({
+            "query": query,
+            "variables": variables,
         });
 
-        if let Err(e) = socket.send(Message::Text(command.to_string().into())) {
-            eprintln!("发送{}请求失败: {}", action, e);
-            return;
+        let response = self
+            .http_client
+            .post(self.graphql_endpoint())
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| format!("发送 GraphQL 请求失败: {}", e))?;
+
+        let status = response.status();
+        let value: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| format!("解析 GraphQL 响应失败: {}", e))?;
+
+        if !status.is_success() {
+            return Err(format!("GraphQL HTTP 状态异常: {}，响应: {}", status, value));
         }
 
-        // 等待响应（现在会等到操作真正完成）
-        match socket.read() {
-            Ok(msg) => {
-                if let Ok(text) = msg.to_text() {
-                    if let Ok(response) = serde_json::from_str::<serde_json::Value>(text) {
-                        if !response["success"].as_bool().unwrap_or(false) {
-                            eprintln!(
-                                "{}失败: {}",
-                                action,
-                                response["message"].as_str().unwrap_or("未知错误")
-                            );
-                        }
-                    }
+        if let Some(errors) = value.get("errors") {
+            return Err(format!("GraphQL errors: {}", errors));
+        }
+
+        Ok(value)
+    }
+
+    async fn hover(&self, x: f32, y: f32) {
+        let query = r#"
+            mutation Hover($x: Float!, $y: Float!) {
+              hover(x: $x, y: $y) { success message }
+            }
+        "#;
+
+        match self.graphql_request(query, json!({"x": x, "y": y})).await {
+            Ok(resp) => {
+                let ok = resp["data"]["hover"]["success"].as_bool().unwrap_or(false);
+                if !ok {
+                    eprintln!(
+                        "hover 失败: {}",
+                        resp["data"]["hover"]["message"].as_str().unwrap_or("未知错误")
+                    );
                 }
             }
-            Err(e) => {
-                eprintln!("读取{}响应失败: {}", action, e);
-            }
+            Err(e) => eprintln!("hover 请求失败: {}", e),
         }
     }
 
-    fn start_game(&mut self, scenario_name: &str) {
+    async fn click(&self, x: f32, y: f32) {
+        let query = r#"
+            mutation Click($x: Float!, $y: Float!) {
+              click(x: $x, y: $y) { success message }
+            }
+        "#;
+
+        match self.graphql_request(query, json!({"x": x, "y": y})).await {
+            Ok(resp) => {
+                let ok = resp["data"]["click"]["success"].as_bool().unwrap_or(false);
+                if !ok {
+                    eprintln!(
+                        "click 失败: {}",
+                        resp["data"]["click"]["message"].as_str().unwrap_or("未知错误")
+                    );
+                }
+            }
+            Err(e) => eprintln!("click 请求失败: {}", e),
+        }
+    }
+
+    async fn screenshot(&self, path: &str) {
+        let query = r#"
+            mutation Screenshot($path: String!) {
+              screenshot(path: $path) { success message }
+            }
+        "#;
+
+        match self.graphql_request(query, json!({"path": path})).await {
+            Ok(resp) => {
+                let ok = resp["data"]["screenshot"]["success"].as_bool().unwrap_or(false);
+                if !ok {
+                    eprintln!(
+                        "screenshot 失败: {}",
+                        resp["data"]["screenshot"]["message"].as_str().unwrap_or("未知错误")
+                    );
+                }
+            }
+            Err(e) => eprintln!("screenshot 请求失败: {}", e),
+        }
+    }
+
+    async fn start_game(&mut self, scenario_name: &str) {
         // 为每个场景创建独立的文件夹
         let scenario_dir = format!("logs/{}", scenario_name);
         std::fs::create_dir_all(&scenario_dir).expect("创建场景目录失败");
@@ -150,6 +193,7 @@ impl GameWorld {
 
         // 分配空闲端口
         self.test_port = find_available_port();
+        self.base_url = format!("http://127.0.0.1:{}", self.test_port);
 
         self.log_file_name = log_file_name;
         self.scenario_dir = scenario_dir;
@@ -163,45 +207,19 @@ impl GameWorld {
 
         self.game_process = Some(child);
 
-        // 等待游戏启动 - 使用 backoff 重试连接
-        let result = backoff::retry(game_startup_backoff(), || {
-            let url = format!("ws://127.0.0.1:{}/ws", self.test_port);
-            match tungstenite::connect(&url) {
-                Ok((mut socket, _)) => {
-                    // 连接成功，关闭测试连接
-                    let _ = socket.close(None);
-                    Ok(())
-                }
-                Err(_) => Err(backoff::Error::transient("游戏未就绪")),
+        let mut backoff = game_startup_backoff();
+        let mut ok = false;
+        while let Some(wait) = backoff::backoff::Backoff::next_backoff(&mut backoff) {
+            let resp = self.http_client.get(self.health_endpoint()).send().await;
+            if matches!(resp, Ok(r) if r.status().is_success()) {
+                ok = true;
+                break;
             }
-        });
-
-        if result.is_err() {
-            panic!("游戏启动超时");
+            tokio::time::sleep(wait).await;
         }
-    }
 
-    fn get_test_port(&self) -> u16 {
-        self.test_port
-    }
-
-    fn connect_ws(&mut self) {
-        let port = self.get_test_port();
-        let url = format!("ws://127.0.0.1:{}/ws", port);
-
-        let result = backoff::retry(
-            websocket_connection_backoff(),
-            || match tungstenite::connect(&url) {
-                Ok((socket, _)) => {
-                    self.ws_connection = Some(socket);
-                    Ok(())
-                }
-                Err(e) => Err(backoff::Error::transient(e)),
-            },
-        );
-
-        if result.is_err() {
-            panic!("无法连接到游戏服务器");
+        if !ok {
+              panic!("游戏启动超时。\n\n请参考 .github/workflows/test.yml，安装 Linux 依赖，并用 xvfb-run 运行测试：\n\nsudo apt-get install ...（依赖列表见 test.yml）\nxvfb-run --auto-servernum --server-args=\"-screen 0 1024x768x24\" cargo test\n");
         }
     }
 
@@ -213,8 +231,8 @@ impl GameWorld {
 #[given("游戏已启动")]
 async fn game_is_running(world: &mut GameWorld) {
     let scenario_name = world.scenario_name.clone();
-    world.start_game(&scenario_name);
-    world.take_screenshot("游戏启动", 1);
+    world.start_game(&scenario_name).await;
+    world.take_screenshot("游戏启动", 1).await;
 }
 
 #[when(expr = "点击按钮 {string}")]
@@ -229,12 +247,12 @@ async fn click_button(world: &mut GameWorld, test_id: String) {
     };
 
     // 先悬停在按钮上
-    world.send_hover(x, y);
-    world.take_screenshot("悬停按钮", 2);
+    world.hover(x, y).await;
+    world.take_screenshot("悬停按钮", 2).await;
 
     // 然后点击
-    world.send_click(x, y);
-    world.take_screenshot("点击按钮", 3);
+    world.click(x, y).await;
+    world.take_screenshot("点击按钮", 3).await;
 }
 
 #[then(expr = "日志中应该包含 {string}")]
@@ -242,17 +260,19 @@ async fn log_should_contain(world: &mut GameWorld, expected: String) {
     let log_file = world.log_file_name.clone();
     let expected_clone = expected.clone();
 
-    let result = backoff::retry(log_check_backoff(), || {
+    let mut backoff = log_check_backoff();
+    let mut ok = false;
+    while let Some(wait) = backoff::backoff::Backoff::next_backoff(&mut backoff) {
         let content = read_last_n_lines(&log_file, 100);
         if content.contains(&expected_clone) {
             world.log_content = content;
-            Ok(())
-        } else {
-            Err(backoff::Error::transient("日志内容未找到"))
+            ok = true;
+            break;
         }
-    });
+        tokio::time::sleep(wait).await;
+    }
 
-    if result.is_err() {
+    if !ok {
         // 失败时显示详细日志
         world.read_log();
         let lines: Vec<&str> = world.log_content.lines().collect();
@@ -268,36 +288,31 @@ async fn log_should_contain(world: &mut GameWorld, expected: String) {
         }
         panic!("日志中未找到期望的内容: {}", expected);
     }
-    world.take_screenshot("日志检查", 4);
+    world.take_screenshot("日志检查", 4).await;
 }
 
 #[then(expr = "存在 {int} 个类型为 {string} 的组件")]
 async fn component_count_should_be(world: &mut GameWorld, count: usize, component_type: String) {
-    // 通过 WebSocket 查询组件数量
-    let url = format!("ws://127.0.0.1:{}/ws", world.get_test_port());
+    let query = r#"
+        query ComponentCounts {
+          componentCounts { name count }
+        }
+    "#;
 
-    let (mut socket, _) = tungstenite::connect(&url).expect("WebSocket 连接失败");
+    let response_json = world
+        .graphql_request(query, json!({}))
+        .await
+        .expect("GraphQL 查询失败");
 
-    // 发送查询命令
-    let query_cmd = json!({
-        "action": "query_components",
-    });
+    let counts = response_json["data"]["componentCounts"]
+        .as_array()
+        .expect("componentCounts 不是数组");
 
-    socket
-        .send(Message::Text(query_cmd.to_string().into()))
-        .expect("发送查询命令失败");
-
-    // 接收响应
-    let response = socket.read().expect("读取响应失败");
-    let response_text = response.to_text().expect("响应不是文本");
-    let response_json: serde_json::Value =
-        serde_json::from_str(response_text).expect("解析响应失败");
-
-    // 从响应中获取组件数量
-    let actual_count = response_json["data"][&component_type]
-        .as_u64()
-        .unwrap_or_else(|| panic!("未找到组件类型: {}", component_type))
-        as usize;
+    let actual_count = counts
+        .iter()
+        .find(|v| v["name"].as_str() == Some(component_type.as_str()))
+        .and_then(|v| v["count"].as_i64())
+        .unwrap_or_else(|| panic!("未找到组件类型: {}", component_type)) as usize;
 
     assert_eq!(
         actual_count, count,
@@ -305,8 +320,7 @@ async fn component_count_should_be(world: &mut GameWorld, count: usize, componen
         count, component_type, actual_count
     );
 
-    socket.close(None).ok();
-    world.take_screenshot("组件数量检查", 5);
+    world.take_screenshot("组件数量检查", 5).await;
 }
 
 #[tokio::main]

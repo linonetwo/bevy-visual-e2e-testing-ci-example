@@ -1,0 +1,120 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "运行所有 Cucumber 测试",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "test",
+                "--test",
+                "cucumber"
+            ],
+            "problemMatcher": [],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+                "clear": true
+            }
+        },
+        {
+            "label": "运行 Cucumber 测试 (带场景过滤)",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "test",
+                "--test",
+                "cucumber",
+                "--",
+                "--name",
+                "${input:scenarioName}"
+            ],
+            "problemMatcher": [],
+            "group": "test",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+                "clear": true
+            }
+        },
+        {
+            "label": "运行 Cucumber 测试 (DEBUG 模式)",
+            "type": "shell",
+            "command": "pwsh",
+            "args": [
+                "-Command",
+                "$env:TEST_DEBUG='1'; cargo test --test cucumber; Remove-Item env:TEST_DEBUG"
+            ],
+            "problemMatcher": [],
+            "group": "test",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+                "clear": true
+            }
+        },
+        {
+            "label": "清理测试日志",
+            "type": "shell",
+            "command": "pwsh",
+            "args": [
+                "-Command",
+                "Remove-Item logs/game_*.log -ErrorAction SilentlyContinue; Write-Host '✓ 测试日志已清理'"
+            ],
+            "problemMatcher": [],
+            "group": "test",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "查看测试日志文件",
+            "type": "shell",
+            "command": "pwsh",
+            "args": [
+                "-Command",
+                "Get-ChildItem logs/game_*.log | Select-Object Name, @{Name='Size(KB)';Expression={[math]::Round($_.Length/1KB,1)}} | Sort-Object Name | Format-Table"
+            ],
+            "problemMatcher": [],
+            "group": "test",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "构建项目",
+            "type": "cargo",
+            "command": "build",
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "运行游戏",
+            "type": "cargo",
+            "command": "run",
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "group": "none"
+        }
+    ],
+    "inputs": [
+        {
+            "id": "scenarioName",
+            "type": "promptString",
+            "description": "输入场景名称（如：点击主按钮）",
+            "default": "点击主按钮"
+        }
+    ]
+}

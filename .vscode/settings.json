@@ -1,0 +1,12 @@
+{
+  "files.exclude": {
+    "**/target": true,
+    "**/node_modules": true,
+    "**/.git": true
+  },
+  "search.exclude": {
+    "**/target": true,
+    "**/wiki/tiddlers/system": true,
+    "**/node_modules": true
+  }
+}
