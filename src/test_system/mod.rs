@@ -1,6 +1,6 @@
 pub mod channel;
 pub mod bevy_systems;
-pub mod graphql;
+pub mod mcp;
 pub mod server;
 
 pub use channel::{TestMessage, TEST_COMMAND_CHANNEL};

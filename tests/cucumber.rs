@@ -71,109 +71,51 @@ impl GameWorld {
         self.screenshot(&screenshot_path).await;
     }
 
-    fn graphql_endpoint(&self) -> String {
-        format!("{}/graphql", self.base_url)
-    }
-
     fn health_endpoint(&self) -> String {
         format!("{}/health", self.base_url)
     }
 
-    async fn graphql_request(
+    /// 调用 MCP tools/call，返回解析后的工具结果 JSON
+    async fn mcp_call(
         &self,
-        query: &str,
-        variables: serde_json::Value,
+        tool: &str,
+        args: serde_json::Value,
     ) -> Result<serde_json::Value, String> {
         let payload = json!({
-            "query": query,
-            "variables": variables,
+            "jsonrpc": "2.0", "id": 1,
+            "method": "tools/call",
+            "params": { "name": tool, "arguments": args }
         });
-
-        let response = self
+        let resp: serde_json::Value = self
             .http_client
-            .post(self.graphql_endpoint())
+            .post(format!("{}/mcp", self.base_url))
             .json(&payload)
-            .send()
-            .await
-            .map_err(|e| format!("发送 GraphQL 请求失败: {}", e))?;
-
-        let status = response.status();
-        let value: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| format!("解析 GraphQL 响应失败: {}", e))?;
-
-        if !status.is_success() {
-            return Err(format!("GraphQL HTTP 状态异常: {}，响应: {}", status, value));
+            .send().await
+            .map_err(|e| format!("MCP 请求失败: {}", e))?
+            .json().await
+            .map_err(|e| format!("解析响应失败: {}", e))?;
+        if let Some(err) = resp.get("error") {
+            return Err(format!("MCP error: {}", err));
         }
-
-        if let Some(errors) = value.get("errors") {
-            return Err(format!("GraphQL errors: {}", errors));
-        }
-
-        Ok(value)
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("{}");
+        serde_json::from_str(text).map_err(|e| format!("解析工具结果失败: {}", e))
     }
 
     async fn hover(&self, x: f32, y: f32) {
-        let query = r#"
-            mutation Hover($x: Float!, $y: Float!) {
-              hover(x: $x, y: $y) { success message }
-            }
-        "#;
-
-        match self.graphql_request(query, json!({"x": x, "y": y})).await {
-            Ok(resp) => {
-                let ok = resp["data"]["hover"]["success"].as_bool().unwrap_or(false);
-                if !ok {
-                    eprintln!(
-                        "hover 失败: {}",
-                        resp["data"]["hover"]["message"].as_str().unwrap_or("未知错误")
-                    );
-                }
-            }
-            Err(e) => eprintln!("hover 请求失败: {}", e),
+        if let Err(e) = self.mcp_call("hover", json!({"x": x, "y": y})).await {
+            eprintln!("hover 失败: {}", e);
         }
     }
 
     async fn click(&self, x: f32, y: f32) {
-        let query = r#"
-            mutation Click($x: Float!, $y: Float!) {
-              click(x: $x, y: $y) { success message }
-            }
-        "#;
-
-        match self.graphql_request(query, json!({"x": x, "y": y})).await {
-            Ok(resp) => {
-                let ok = resp["data"]["click"]["success"].as_bool().unwrap_or(false);
-                if !ok {
-                    eprintln!(
-                        "click 失败: {}",
-                        resp["data"]["click"]["message"].as_str().unwrap_or("未知错误")
-                    );
-                }
-            }
-            Err(e) => eprintln!("click 请求失败: {}", e),
+        if let Err(e) = self.mcp_call("click", json!({"x": x, "y": y})).await {
+            eprintln!("click 失败: {}", e);
         }
     }
 
     async fn screenshot(&self, path: &str) {
-        let query = r#"
-            mutation Screenshot($path: String!) {
-              screenshot(path: $path) { success message }
-            }
-        "#;
-
-        match self.graphql_request(query, json!({"path": path})).await {
-            Ok(resp) => {
-                let ok = resp["data"]["screenshot"]["success"].as_bool().unwrap_or(false);
-                if !ok {
-                    eprintln!(
-                        "screenshot 失败: {}",
-                        resp["data"]["screenshot"]["message"].as_str().unwrap_or("未知错误")
-                    );
-                }
-            }
-            Err(e) => eprintln!("screenshot 请求失败: {}", e),
+        if let Err(e) = self.mcp_call("screenshot", json!({"path": path})).await {
+            eprintln!("screenshot 失败: {}", e);
         }
     }
 
@@ -293,33 +235,23 @@ async fn log_should_contain(world: &mut GameWorld, expected: String) {
 
 #[then(expr = "存在 {int} 个类型为 {string} 的组件")]
 async fn component_count_should_be(world: &mut GameWorld, count: usize, component_type: String) {
-    let query = r#"
-        query ComponentCounts {
-          componentCounts { name count }
-        }
-    "#;
-
-    let response_json = world
-        .graphql_request(query, json!({}))
+    let data = world
+        .mcp_call("component_counts", json!({}))
         .await
-        .expect("GraphQL 查询失败");
+        .expect("组件查询失败");
 
-    let counts = response_json["data"]["componentCounts"]
-        .as_array()
-        .expect("componentCounts 不是数组");
-
-    let actual_count = counts
+    let counts = data.as_array().expect("component_counts 不是数组");
+    let actual = counts
         .iter()
         .find(|v| v["name"].as_str() == Some(component_type.as_str()))
-        .and_then(|v| v["count"].as_i64())
+        .and_then(|v| v["count"].as_u64())
         .unwrap_or_else(|| panic!("未找到组件类型: {}", component_type)) as usize;
 
     assert_eq!(
-        actual_count, count,
+        actual, count,
         "组件数量不匹配: 期望 {} 个 {}，实际 {} 个",
-        count, component_type, actual_count
+        count, component_type, actual
     );
-
     world.take_screenshot("组件数量检查", 5).await;
 }
 
