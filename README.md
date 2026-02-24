@@ -2,7 +2,7 @@
 
 使用 Bevy v0.17.2 开发的简单游戏示例。主要是设置了测试框架，确保 Github Copilot 能自己通过 e2e 测试验证改动，自己 TDD。
 
-基于讨论 https://github.com/bevyengine/bevy/discussions/21750
+基于讨论 <https://github.com/bevyengine/bevy/discussions/21750>
 
 ## 功能
 
@@ -35,3 +35,38 @@ cargo test --test cucumber
 Github Actions 里仿照 Bevy 官方的 <https://github.com/bevyengine/bevy/blob/main/.github/workflows/example-run.yml> 工作流设置可视化测试所需的依赖。
 
 CI 里初次编译需要较长时间，后续如果只修改应用代码而没有更新依赖，缓存会命中，加载700多兆字节的缓存后，应该只需十几秒就能运行完毕。
+
+## MCP（测试与编辑器集成）
+
+本项目内嵌了一个轻量级的 MCP（JSON-RPC over HTTP）端点，供 VS Code 扩展、测试套件或外部 agent 直接控制游戏（无需额外 Node 进程）。
+
+- 端点：`POST /mcp`
+- 默认端口：`9222`（可通过环境变量 `TEST_PORT` 修改）
+- 协议：JSON-RPC 2.0，支持 `initialize`、`tools/list`、`tools/call` 等方法
+
+常见用途：
+
+- 在 VS Code 工作区中使用 `.vscode/mcp.json` 指向：
+
+```jsonc
+{
+ "servers": {
+  "bevy-game": {
+   "type": "http",
+   "url": "http://127.0.0.1:9222/mcp"
+  }
+ }
+}
+```
+
+- Cucumber / 自动化测试现在直接调用 `/mcp`（见 `tests/cucumber.rs` 中的 `mcp_call` 实现）。
+
+快速运行（测试模式，启动 MCP）：
+
+```bash
+TEST_PORT=9222 TEST_LOG_FILE=logs/game.log cargo run -- --test-mode
+# 或者
+cargo run -- --test-mode
+```
+
+使用 VS Code MCP 面板或测试套件连接后，可通过 `tools/list` 查看可用工具，使用 `tools/call` 调用（例如 `take_snapshot` / `click_by_id` / `component_counts` / `screenshot` 等）。
