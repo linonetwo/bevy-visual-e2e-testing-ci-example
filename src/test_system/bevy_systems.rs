@@ -51,8 +51,13 @@ pub fn receive_test_messages(
                             .build();
 
                         let result = backoff::retry(backoff_config, || {
-                            if std::path::Path::new(&path_clone).exists() {
-                                Ok(())
+                            let path = std::path::Path::new(&path_clone);
+                            if path.exists() {
+                                // 等文件写入完成（size > 0），避免 base64 读到空数据
+                                match std::fs::metadata(&path_clone) {
+                                    Ok(m) if m.len() > 0 => Ok(()),
+                                    _ => Err(backoff::Error::transient("文件未写完")),
+                                }
                             } else {
                                 Err(backoff::Error::transient("文件未生成"))
                             }
