@@ -47,21 +47,33 @@ pub async fn mcp_handler(
                     // 这里检测到后输出标准 MCP ImageContent { type:"image", data, mimeType }
                     if let Some(img) = data.get("__mcp_image") {
                         let img_data = img.get("data").and_then(Value::as_str).unwrap_or("");
-                        let mime = img.get("mimeType").and_then(Value::as_str).unwrap_or("image/png");
-                        let text = data.get("text").and_then(Value::as_str).unwrap_or("截图完成");
-                        RpcResp::ok(id, json!({
-                            "content": [
-                                { "type": "text", "text": text },
-                                { "type": "image", "data": img_data, "mimeType": mime }
-                            ]
-                        }))
+                        let mime = img
+                            .get("mimeType")
+                            .and_then(Value::as_str)
+                            .unwrap_or("image/png");
+                        let text = data
+                            .get("text")
+                            .and_then(Value::as_str)
+                            .unwrap_or("截图完成");
+                        RpcResp::ok(
+                            id,
+                            json!({
+                                "content": [
+                                    { "type": "text", "text": text },
+                                    { "type": "image", "data": img_data, "mimeType": mime }
+                                ]
+                            }),
+                        )
                     } else {
-                        RpcResp::ok(id, json!({
-                            "content": [{
-                                "type": "text",
-                                "text": serde_json::to_string_pretty(&data).unwrap_or_default()
-                            }]
-                        }))
+                        RpcResp::ok(
+                            id,
+                            json!({
+                                "content": [{
+                                    "type": "text",
+                                    "text": serde_json::to_string_pretty(&data).unwrap_or_default()
+                                }]
+                            }),
+                        )
                     }
                 }
                 Err(e) => RpcResp::err(id, -32603, e),

@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use log::info;
 
-use crate::{Ball, GameButton, TestId};
 use crate::test_system::channel::{LogEntryData, TestMessage, UINodeData, TEST_COMMAND_CHANNEL};
+use crate::{Ball, GameButton, TestId};
 
 // 从消息队列接收测试消息并直接处理
 pub fn receive_test_messages(
@@ -17,7 +17,6 @@ pub fn receive_test_messages(
         while let Ok(msg) = channel.receiver.try_recv() {
             match msg {
                 // ---- 原有消息 ----
-
                 TestMessage::Hover { x, y, response } => {
                     info!("收到测试悬停消息: ({}, {})", x, y);
                     for mut interaction in button_query.iter_mut() {
@@ -83,7 +82,6 @@ pub fn receive_test_messages(
                 }
 
                 // ---- CDP 风格：UI 快照 ----
-
                 TestMessage::TakeSnapshot { response } => {
                     info!("收到 UI 快照请求");
                     commands.queue(move |world: &mut World| {
@@ -94,30 +92,26 @@ pub fn receive_test_messages(
                 }
 
                 // ---- 按 ID 操作元素 ----
-
                 TestMessage::ClickById { id, response } => {
                     info!("收到 ClickById: {}", id);
                     commands.queue(move |world: &mut World| {
-                        let found = find_entity_and_set_interaction(
-                            world,
-                            &id,
-                            Interaction::Pressed,
-                        );
+                        let found =
+                            find_entity_and_set_interaction(world, &id, Interaction::Pressed);
                         let _ = response.send(found);
                     });
                 }
                 TestMessage::HoverById { id, response } => {
                     info!("收到 HoverById: {}", id);
                     commands.queue(move |world: &mut World| {
-                        let found = find_entity_and_set_interaction(
-                            world,
-                            &id,
-                            Interaction::Hovered,
-                        );
+                        let found =
+                            find_entity_and_set_interaction(world, &id, Interaction::Hovered);
                         let _ = response.send(found);
                     });
                 }
-                TestMessage::ClickButtonByName { button_name, response } => {
+                TestMessage::ClickButtonByName {
+                    button_name,
+                    response,
+                } => {
                     info!("收到 ClickButtonByName: {}", button_name);
                     commands.queue(move |world: &mut World| {
                         let found = find_entity_and_set_interaction(
@@ -130,7 +124,6 @@ pub fn receive_test_messages(
                 }
 
                 // ---- 键盘 / 文本输入 ----
-
                 TestMessage::PressKey { key, response } => {
                     info!("收到 PressKey: {}", key);
                     let success = if let Some(key_code) = parse_key_code(&key) {
@@ -143,7 +136,11 @@ pub fn receive_test_messages(
                     };
                     let _ = response.send(success);
                 }
-                TestMessage::FillText { id, value, response } => {
+                TestMessage::FillText {
+                    id,
+                    value,
+                    response,
+                } => {
                     info!("收到 FillText: {} = '{}'", id, value);
                     let value_clone = value.clone();
                     commands.queue(move |world: &mut World| {
@@ -161,28 +158,27 @@ pub fn receive_test_messages(
                 }
 
                 // ---- 拖拽 ----
-
-                TestMessage::Drag { from_id, to_id, response } => {
+                TestMessage::Drag {
+                    from_id,
+                    to_id,
+                    response,
+                } => {
                     info!("收到 Drag: {} -> {}", from_id, to_id);
                     commands.queue(move |world: &mut World| {
                         // 模拟：按下源元素，悬停目标元素
-                        let success = find_entity_and_set_interaction(
-                            world,
-                            &from_id,
-                            Interaction::Pressed,
-                        );
-                        find_entity_and_set_interaction(
-                            world,
-                            &to_id,
-                            Interaction::Hovered,
-                        );
+                        let success =
+                            find_entity_and_set_interaction(world, &from_id, Interaction::Pressed);
+                        find_entity_and_set_interaction(world, &to_id, Interaction::Hovered);
                         let _ = response.send(success);
                     });
                 }
 
                 // ---- 日志 / 脚本 ----
-
-                TestMessage::GetLogs { lines, log_file, response } => {
+                TestMessage::GetLogs {
+                    lines,
+                    log_file,
+                    response,
+                } => {
                     info!("收到 GetLogs: lines={}", lines);
                     std::thread::spawn(move || {
                         let file_path = log_file.unwrap_or_else(|| {
@@ -202,9 +198,15 @@ pub fn receive_test_messages(
                             let result = std::process::Command::new("curl")
                                 .args([
                                     "-s",
-                                    "-X", "POST",
-                                    "-H", "Content-Type: application/json",
-                                    "-d", &format!("{{\"script\":{}}}", serde_json::to_string(&script).unwrap_or_default()),
+                                    "-X",
+                                    "POST",
+                                    "-H",
+                                    "Content-Type: application/json",
+                                    "-d",
+                                    &format!(
+                                        "{{\"script\":{}}}",
+                                        serde_json::to_string(&script).unwrap_or_default()
+                                    ),
                                     &url,
                                 ])
                                 .output()
@@ -371,11 +373,7 @@ fn find_entity_by_test_id(world: &mut World, id: &str) -> Option<Entity> {
 }
 
 /// 找到实体并设置 Interaction 组件，返回是否成功
-fn find_entity_and_set_interaction(
-    world: &mut World,
-    id: &str,
-    interaction: Interaction,
-) -> bool {
+fn find_entity_and_set_interaction(world: &mut World, id: &str, interaction: Interaction) -> bool {
     if let Some(entity) = find_entity_by_test_id(world, id) {
         if let Some(mut inter) = world.get_mut::<Interaction>(entity) {
             *inter = interaction;

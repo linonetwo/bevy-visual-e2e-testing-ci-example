@@ -79,7 +79,7 @@ fn setup_test_logging(log_file: &str) {
                 .appender("file")
                 .appender("debug_file")
                 .additive(false)
-            .build("test_system", LevelFilter::Info),
+                .build("test_system", LevelFilter::Info),
         )
         // 其他所有库：只输出到 debug 日志
         .build(Root::builder().appender("debug_file").build(debug_level))

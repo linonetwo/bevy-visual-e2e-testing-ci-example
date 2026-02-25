@@ -1,15 +1,18 @@
-//! UI 交互工具：take_snapshot、screenshot、click、hover、fill、drag 等
-//!
-//! screenshot 对标 Chrome DevTools MCP screenshot.ts：
-//! 截图成功后读取文件字节并 base64 内联，返回 __mcp_image 标记，
-//! handler.rs 检测到该标记后输出标准 MCP ImageContent { type:"image", data, mimeType }。
-
 use crossbeam_channel::Sender;
 use serde_json::{json, Value};
 
 use crate::test_system::channel::TestMessage;
 
 use super::dispatch_shared::{arg_f32, arg_str, bool_cmd, send, SCREENSHOT_TIMEOUT, TIMEOUT};
+
+macro_rules! try_ok {
+    ($expr:expr) => {
+        match $expr {
+            Ok(v) => v,
+            Err(e) => return Some(Err(e)),
+        }
+    };
+}
 
 pub async fn handle(
     sender: &Sender<TestMessage>,
@@ -20,7 +23,13 @@ pub async fn handle(
         "health" => Ok(json!({ "status": "OK" })),
 
         "take_snapshot" => {
-            let nodes = match send(sender, |tx| TestMessage::TakeSnapshot { response: tx }, TIMEOUT).await {
+            let nodes = match send(
+                sender,
+                |tx| TestMessage::TakeSnapshot { response: tx },
+                TIMEOUT,
+            )
+            .await
+            {
                 Ok(v) => v,
                 Err(e) => return Some(Err(e)),
             };
@@ -50,16 +59,17 @@ pub async fn handle(
                 Ok(v) => v,
                 Err(e) => return Some(Err(e)),
             };
-            let ok = match send(
-                sender,
-                |tx| TestMessage::Screenshot { path: path.clone(), response: tx },
-                SCREENSHOT_TIMEOUT,
-            )
-            .await
-            {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
+            let ok = try_ok!(
+                send(
+                    sender,
+                    |tx| TestMessage::Screenshot {
+                        path: path.clone(),
+                        response: tx
+                    },
+                    SCREENSHOT_TIMEOUT,
+                )
+                .await
+            );
             if !ok {
                 return Some(Ok(json!({
                     "success": false,
@@ -90,124 +100,121 @@ pub async fn handle(
         }
 
         "click" => {
-            let (x, y) = match (arg_f32(args, "x"), arg_f32(args, "y")) {
-                (Ok(x), Ok(y)) => (x, y),
-                (Err(e), _) | (_, Err(e)) => return Some(Err(e)),
-            };
-            let ok = match send(sender, |tx| TestMessage::Click { x, y, response: tx }, TIMEOUT).await {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
+            let x = try_ok!(arg_f32(args, "x"));
+            let y = try_ok!(arg_f32(args, "y"));
+            let ok = try_ok!(
+                send(
+                    sender,
+                    |tx| TestMessage::Click { x, y, response: tx },
+                    TIMEOUT
+                )
+                .await
+            );
             Ok(bool_cmd("click", ok))
         }
 
         "hover" => {
-            let (x, y) = match (arg_f32(args, "x"), arg_f32(args, "y")) {
-                (Ok(x), Ok(y)) => (x, y),
-                (Err(e), _) | (_, Err(e)) => return Some(Err(e)),
-            };
-            let ok = match send(sender, |tx| TestMessage::Hover { x, y, response: tx }, TIMEOUT).await {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
+            let x = try_ok!(arg_f32(args, "x"));
+            let y = try_ok!(arg_f32(args, "y"));
+            let ok = try_ok!(
+                send(
+                    sender,
+                    |tx| TestMessage::Hover { x, y, response: tx },
+                    TIMEOUT
+                )
+                .await
+            );
             Ok(bool_cmd("hover", ok))
         }
 
         "click_by_id" => {
-            let id = match arg_str(args, "id") {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
-            let ok = match send(sender, |tx| TestMessage::ClickById { id, response: tx }, TIMEOUT).await {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
+            let id = try_ok!(arg_str(args, "id"));
+            let ok = try_ok!(
+                send(
+                    sender,
+                    |tx| TestMessage::ClickById { id, response: tx },
+                    TIMEOUT
+                )
+                .await
+            );
             Ok(bool_cmd("click_by_id", ok))
         }
 
         "hover_by_id" => {
-            let id = match arg_str(args, "id") {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
-            let ok = match send(sender, |tx| TestMessage::HoverById { id, response: tx }, TIMEOUT).await {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
+            let id = try_ok!(arg_str(args, "id"));
+            let ok = try_ok!(
+                send(
+                    sender,
+                    |tx| TestMessage::HoverById { id, response: tx },
+                    TIMEOUT
+                )
+                .await
+            );
             Ok(bool_cmd("hover_by_id", ok))
         }
 
         "click_button" => {
-            let button_name = match arg_str(args, "button_name") {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
-            let ok = match send(
-                sender,
-                |tx| TestMessage::ClickButtonByName { button_name, response: tx },
-                TIMEOUT,
-            )
-            .await
-            {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
+            let button_name = try_ok!(arg_str(args, "button_name"));
+            let ok = try_ok!(
+                send(
+                    sender,
+                    |tx| TestMessage::ClickButtonByName {
+                        button_name,
+                        response: tx
+                    },
+                    TIMEOUT
+                )
+                .await
+            );
             Ok(bool_cmd("click_button", ok))
         }
 
         "press_key" => {
-            let key = match arg_str(args, "key") {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
-            let ok = match send(sender, |tx| TestMessage::PressKey { key, response: tx }, TIMEOUT).await {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
+            let key = try_ok!(arg_str(args, "key"));
+            let ok = try_ok!(
+                send(
+                    sender,
+                    |tx| TestMessage::PressKey { key, response: tx },
+                    TIMEOUT
+                )
+                .await
+            );
             Ok(bool_cmd("press_key", ok))
         }
 
         "fill" => {
-            let id = match arg_str(args, "id") {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
-            let value = match arg_str(args, "value") {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
-            let ok = match send(
-                sender,
-                |tx| TestMessage::FillText { id, value, response: tx },
-                TIMEOUT,
-            )
-            .await
-            {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
+            let id = try_ok!(arg_str(args, "id"));
+            let value = try_ok!(arg_str(args, "value"));
+            let ok = try_ok!(
+                send(
+                    sender,
+                    |tx| TestMessage::FillText {
+                        id,
+                        value,
+                        response: tx
+                    },
+                    TIMEOUT
+                )
+                .await
+            );
             Ok(bool_cmd("fill", ok))
         }
 
         "drag" => {
-            let from_id = match arg_str(args, "from_id") {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
-            let to_id = match arg_str(args, "to_id") {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
-            let ok = match send(
-                sender,
-                |tx| TestMessage::Drag { from_id, to_id, response: tx },
-                TIMEOUT,
-            )
-            .await
-            {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
+            let from_id = try_ok!(arg_str(args, "from_id"));
+            let to_id = try_ok!(arg_str(args, "to_id"));
+            let ok = try_ok!(
+                send(
+                    sender,
+                    |tx| TestMessage::Drag {
+                        from_id,
+                        to_id,
+                        response: tx
+                    },
+                    TIMEOUT
+                )
+                .await
+            );
             Ok(bool_cmd("drag", ok))
         }
 

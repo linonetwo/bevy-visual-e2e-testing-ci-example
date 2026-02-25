@@ -90,14 +90,18 @@ impl GameWorld {
             .http_client
             .post(format!("{}/mcp", self.base_url))
             .json(&payload)
-            .send().await
+            .send()
+            .await
             .map_err(|e| format!("MCP 请求失败: {}", e))?
-            .json().await
+            .json()
+            .await
             .map_err(|e| format!("解析响应失败: {}", e))?;
         if let Some(err) = resp.get("error") {
             return Err(format!("MCP error: {}", err));
         }
-        let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("{}");
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap_or("{}");
         serde_json::from_str(text).map_err(|e| format!("解析工具结果失败: {}", e))
     }
 
@@ -161,7 +165,7 @@ impl GameWorld {
         }
 
         if !ok {
-              panic!("游戏启动超时。\n\n请参考 .github/workflows/test.yml，安装 Linux 依赖，并用 xvfb-run 运行测试：\n\nsudo apt-get install ...（依赖列表见 test.yml）\nxvfb-run --auto-servernum --server-args=\"-screen 0 1024x768x24\" cargo test\n");
+            panic!("游戏启动超时。\n\n请参考 .github/workflows/test.yml，安装 Linux 依赖，并用 xvfb-run 运行测试：\n\nsudo apt-get install ...（依赖列表见 test.yml）\nxvfb-run --auto-servernum --server-args=\"-screen 0 1024x768x24\" cargo test\n");
         }
     }
 

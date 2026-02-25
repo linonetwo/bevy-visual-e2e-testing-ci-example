@@ -12,10 +12,10 @@ use crate::test_system::channel::TestMessage;
 
 #[path = "dispatch_shared.rs"]
 mod dispatch_shared;
-#[path = "dispatch_ui.rs"]
-mod dispatch_ui;
 #[path = "dispatch_system.rs"]
 mod dispatch_system;
+#[path = "dispatch_ui.rs"]
+mod dispatch_ui;
 
 pub async fn call_tool(
     sender: &Sender<TestMessage>,
@@ -30,4 +30,3 @@ pub async fn call_tool(
     }
     Err(format!("未知工具: {}", name))
 }
-

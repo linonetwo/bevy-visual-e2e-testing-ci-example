@@ -74,14 +74,12 @@ pub enum TestMessage {
     },
 
     // ---- CDP 风格 UI 快照 ----
-
     /// 获取 UI 节点树快照（类似 CDP take_snapshot / a11y 树）
     TakeSnapshot {
         response: oneshot::Sender<Vec<UINodeData>>,
     },
 
     // ---- 按 ID 操作元素 ----
-
     /// 按 test_id / Name / "bits:{n}" 点击元素
     ClickById {
         id: String,
@@ -99,7 +97,6 @@ pub enum TestMessage {
     },
 
     // ---- 键盘 / 文本输入 ----
-
     /// 模拟按键（支持 "Space" / "Enter" / "Escape" / "ArrowUp" 等）
     PressKey {
         key: String,
@@ -113,7 +110,6 @@ pub enum TestMessage {
     },
 
     // ---- 拖拽 ----
-
     /// 模拟拖拽：从 from_id 拖到 to_id
     Drag {
         from_id: String,
@@ -122,7 +118,6 @@ pub enum TestMessage {
     },
 
     // ---- 日志 / 脚本 ----
-
     /// 读取后端日志文件，返回最近 N 行
     GetLogs {
         lines: u32,
